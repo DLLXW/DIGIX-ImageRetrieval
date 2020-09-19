@@ -16,19 +16,32 @@ from PIL import Image
 from PIL import ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 #
-def cosin_metric(x1, x2):
-    return np.dot(x1, x2) / (np.linalg.norm(x1) * np.linalg.norm(x2))
+def euler_dis(query_fea, gallery_fea):
+    query_fea = query_fea.transpose(1, 0)
+    inner_dot = gallery_fea.mm(query_fea)
+    dis = (gallery_fea ** 2).sum(dim=1, keepdim=True) + (query_fea ** 2).sum(dim=0, keepdim=True)
+    dis = dis - 2 * inner_dot
+    dis = dis.transpose(1, 0)
+    return dis
 
-def cal_dis(query_fea, gallery_fea):
-        query_fea = query_fea.transpose(1, 0)
-        inner_dot = gallery_fea.mm(query_fea)
-        dis = (gallery_fea ** 2).sum(dim=1, keepdim=True) + (query_fea ** 2).sum(dim=0, keepdim=True)
-        dis = dis - 2 * inner_dot
-        dis = dis.transpose(1, 0)
-        return dis
+def cosin_dis(query_fea,gallery_fea):
+    query_fea = query_fea.transpose(1, 0)
+    inner_dot = gallery_fea.mm(query_fea)
+    dis1 = (gallery_fea ** 2).sum(dim=1, keepdim=True)
+    dis2 = (query_fea ** 2).sum(dim=0, keepdim=True)
+    dis=dis1.sqrt().mm(dis2.sqrt())
+    dis = inner_dot/dis
+    dis = dis.transpose(1, 0)
+    return -dis
 
-def return_index(query_fea, gallery_fea):
-    dis = cal_dis(query_fea, gallery_fea)
+def return_index_cos(query_fea, gallery_fea):
+    dis = cosin_dis(query_fea, gallery_fea)
+    sorted_index = torch.argsort(dis, dim=1)
+    if top_k != 0:
+        sorted_index = sorted_index[:, :top_k]
+    return dis, sorted_index
+def return_index_euler(query_fea, gallery_fea):
+    dis = euler_dis(query_fea, gallery_fea)
     sorted_index = torch.argsort(dis, dim=1)
     if top_k != 0:
         sorted_index = sorted_index[:, :top_k]
@@ -49,16 +62,12 @@ def get_featurs(model, testloader,batchsize=10):
         image_names+=img_path
         cnt_iter+=1
         data = data.to(device)
-        output=model.module.xcep_net(data)
+        output=model.module.extract_feat(data)
         output=output.view(output.size(0), -1)
         #
         feature = output.data.cpu().numpy()
         feature=preprocessing.normalize(feature,norm='l2')
         #
-        output_arc,_= model(data)
-        feature_arc = output_arc.data.cpu().numpy()
-        feature_arc=preprocessing.normalize(feature_arc,norm='l2')
-        feature=np.concatenate((feature,feature_arc),axis=1)
         if features is None:
             features = feature
         else:
@@ -73,8 +82,9 @@ def get_featurs(model, testloader,batchsize=10):
 if __name__ == '__main__':
     begin_time=time.time()
     opt=Config()
+    top_k=10
     model  = LandmarkNet(n_classes=opt.num_classes,
-                     model_name=model_name,
+                     model_name=opt.backbone,
                      pooling=opt.pooling,
                      loss_module=opt.loss_module,
                     fc_dim=opt.fc_dim)
@@ -85,7 +95,7 @@ if __name__ == '__main__':
     model.load_state_dict(best_weight)
     model.eval()
     #
-    for mode in ['qeuery','gallary']:
+    for mode in ['qeuery','gallery']:
         if mode=='gallery':
             image_datasets = retriDatasetInfer(opt.gallery_dir, input_size=opt.input_size)
             dataset_loaders = torch.utils.data.DataLoader(image_datasets,
@@ -97,15 +107,16 @@ if __name__ == '__main__':
             dataset_loaders = torch.utils.data.DataLoader(image_datasets,
                                                       batch_size=opt.test_batch_size,
                                                       shuffle=False, num_workers=4)
-            qeuery_frt,qeuery_names=get_featurs(model, dataset_loaders,opt.test_batch_size)
+            query_frt,query_names=get_featurs(model, dataset_loaders,opt.test_batch_size)
             
     print('get features finished..............')
     print('begin searching images............')
     query_frt=torch.from_numpy(query_frt)
     gallery_frt=torch.from_numpy(gallery_frt)
-    _,sorted_index=return_index(query_frt, gallery_frt)
+    _,sorted_index=return_index_cos(query_frt, gallery_frt)
     sorted_index=sorted_index.numpy().tolist()
     csv_file = open('submission.csv', 'w')
+    len_query,len_gallery=len(query_frt),len(gallery_frt)
     
     for i in range(len_query):
         query=query_frt[i]
