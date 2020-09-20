@@ -1,7 +1,7 @@
 ### 代码运行步骤说明:
 
 > - 首先下载原始数据,然后需要运行utils/splitTrainVal.py将原始数据分割为训练和验证两部分.
-> - modeling/models.py下面的LandmarkNet类目录下定义了模型(res50,101,pnasnet三个模型)
+> - modeling/models.py下面的LandmarkNet类目录下定义了模型
 >   - [参考](https://github.com/lyakaap/Landmark2019-1st-and-3rd-Place-Solution)
 > - 在config/config.py下面设置好数据路径,优化器,loss类型,pooling类型等训练参数
 >   - 训练参数很重要，学习率的设置,batchl,loss,优化器等(训练得好,线上70+，训练不好线上60-)
